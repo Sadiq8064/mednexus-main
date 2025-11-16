@@ -1,4 +1,5 @@
 # main_updated.py — Part 1/5
+import os
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from pydantic import BaseModel, EmailStr
 from pymongo import MongoClient
@@ -12,7 +13,6 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Any, Optional
 import asyncio
-import redis as sync_redis  # Fallback sync redis
 from upstash_redis.asyncio import Redis
 import sib_api_v3_sdk
 from sib_api_v3_sdk.rest import ApiException
@@ -20,27 +20,50 @@ import random
 import requests  # external RAG API calls
 
 # ============================
-# 🔧 Configuration
+# 🔧 Environment Configuration (Railway)
 # ============================
-# Redis configuration with error handling
+
+# Load environment variables
+REDIS_URL = os.getenv("REDIS_URL")
+REDIS_TOKEN = os.getenv("REDIS_TOKEN")
+MONGO_URI = os.getenv("MONGO_URI")
+DB_NAME = os.getenv("DB_NAME", "fastapi_demo_db")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+BREVO_API_KEY = os.getenv("BREVO_API_KEY")
+
+# Validate required envs
+required_env = {
+    "REDIS_URL": REDIS_URL,
+    "REDIS_TOKEN": REDIS_TOKEN,
+    "MONGO_URI": MONGO_URI,
+    "GEMINI_API_KEY": GEMINI_API_KEY,
+    "BREVO_API_KEY": BREVO_API_KEY
+}
+
+missing_env = [k for k, v in required_env.items() if v is None]
+if missing_env:
+    raise RuntimeError(f"❌ Missing environment variables: {', '.join(missing_env)}")
+
+# ============================
+# 🔧 Redis Setup
+# ============================
 try:
-    redis = Redis(
-        url="https://quality-tahr-29928.upstash.io",
-        token="AnToAAIgcDIRH4cqKchZJBZ0HXoIwfHpjfGpxSBd4ZO_rnVIAXVUWw"
-    )
+    redis = Redis(url=REDIS_URL, token=REDIS_TOKEN)
     REDIS_AVAILABLE = True
     print("✅ Upstash Redis Connected")
 except Exception as e:
-    print(f"❌ Upstash Redis failed: {e}. Using fallback...")
+    print(f"❌ Upstash Redis failed: {e}")
     REDIS_AVAILABLE = False
     redis = None
 
-# Embedding model
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+# ============================
+# 🔧 Embedding Model
+# ============================
+embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-# MongoDB
-MONGO_URI = "mongodb+srv://iitguwahati471_db_user:IIIeqOaVyrnFMkTO@cluster0.hsrf90z.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
-DB_NAME = "fastapi_demo_db"
+# ============================
+# 🔧 MongoDB Setup
+# ============================
 client = MongoClient(MONGO_URI)
 db = client[DB_NAME]
 
@@ -59,15 +82,17 @@ otp_collection.create_index("email", unique=True)
 otp_collection.create_index("created_at", expireAfterSeconds=600)
 feedback_collection.create_index("email", unique=True)
 
-# Gemini Setup
-GEMINI_API_KEY = "AIzaSyAFegdFkbT1x5ELcqPfv2W55l24G1olKJ8"
+# ============================
+# 🔧 Gemini Setup
+# ============================
 genai.configure(api_key=GEMINI_API_KEY)
 gemini_model = genai.GenerativeModel("gemini-2.5-flash")
 
-# Brevo Configuration
-BREVO_API_KEY = "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"
+# ============================
+# 🔧 Brevo Email Setup
+# ============================
 configuration = sib_api_v3_sdk.Configuration()
-configuration.api_key['api-key'] = BREVO_API_KEY
+configuration.api_key["api-key"] = BREVO_API_KEY
 api_instance = sib_api_v3_sdk.TransactionalEmailsApi(
     sib_api_v3_sdk.ApiClient(configuration)
 )
@@ -75,7 +100,10 @@ api_instance = sib_api_v3_sdk.TransactionalEmailsApi(
 # ============================
 # ⚙️ FastAPI App Setup
 # ============================
-app = FastAPI(title="Medical Chat API", description="FastAPI + Gemini 2.5 Flash + MongoDB + Redis + OTP + Feedback")
+app = FastAPI(
+    title="Medical Chat API",
+    description="FastAPI + Gemini 2.5 Flash + MongoDB + Redis + OTP + Feedback"
+)
 
 # ============================
 # 📘 Pydantic Models
@@ -103,6 +131,7 @@ class FeedbackRequest(BaseModel):
 
 class DeleteAccountRequest(BaseModel):
     email: EmailStr
+
 
 # ============================
 # 🔧 Utility Functions
